@@ -1,0 +1,369 @@
+---
+title: "Public Health Whole Genome Sequencing Analysis Report"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    navbar:
+      - { title: "ODHL", href:
+      "https://odh.ohio.gov/know-our-programs/microbiology/microbiology",
+      align_right}
+    logo: "odh_logo_240128.png"
+params:
+  configFILE: "REP_CONFIG"
+  sampletable: "REP_SAMPLETABLE"
+  arpredictions: "REP_PREDICT"
+  projectname: "REP_PROJID"
+  date: "REP_DATE"
+  testing: "N"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libs, echo=FALSE,include=FALSE,warning=FALSE,message=FALSE}
+library(ape)
+library(argparser)
+library(crosstalk)
+library(DT)
+library(flexdashboard)
+library(ggplot2)
+library(ggpubr)
+library(heatmaply)
+library(htmlwidgets)
+library(kableExtra)
+library(pander)
+library(phytools)
+library(plotly)
+library(RColorBrewer)
+library(rgl)
+library(rmarkdown)
+library(yaml)
+knitr::opts_chunk$set(echo = FALSE,warning=FALSE,message=FALSE)
+options(rgl.useNULL = TRUE) # Suppress the separate window.
+'%ni%' <- function(x,y)!('%in%'(x,y))
+```
+
+```{r args, echo=FALSE,warning=FALSE}
+username="S. Chill"
+reporttype="Standard"
+
+#position args
+if (params$testing=="N"){
+  projectname=params$projectname
+  configFILE=params$configFILE
+  date=params$date
+  sampletable=params$sampletable
+  arpredictions=params$arpredictions
+} else {
+  projectname="OH-M6588-231201"
+  outdir="OH-M6588-231201/"
+  date="12/18/23"
+  sampletable="final_report.csv"
+  arpredictions="ar_predictions.tsv"
+}
+```
+
+```{r prep, echo=FALSE, warning=FALSE}
+# read yaml file
+config <- read_yaml(configFILE)
+
+## set header text
+subHeaderText = paste0(config$sub.title, ": ", reporttype)
+
+## get header table
+headerDF <- data.frame(date=date,project=projectname,name=username)
+
+## get summary text
+summaryTEXT <- config$summary.paragraph
+
+## get disclaimer text
+disclaimerTEXT <- config$disclaimer.text
+
+## get methods text
+methodsTEXT <- config$methods.text
+```
+
+```{r read, echo=FALSE}
+## get sample table
+sampleDF <- read.csv2(sampletable,sep=",")
+rownames(sampleDF)=sampleDF$specimen_id
+
+# get ar-summary
+ar_summary <- read.csv2(arpredictions,sep='\t',check.names = F)
+ar_summary$Sample=gsub("_[0-9][0-9][0-9][0-9]_length_[0-9]*","",ar_summary$Sample)
+ar_summary$Sample=gsub("_[0-9][0-9][0-9]_length_[0-9]*","",ar_summary$Sample)
+ar_summary$Sample=gsub("_[0-9][0-9]_length_[0-9]*","",ar_summary$Sample)
+ar_summary$Sample=gsub("_[0-9]_length_[0-9]*","",ar_summary$Sample)
+ar_summary$Sample=gsub(paste0("-",projectname),"",ar_summary$Sample)
+ar_summary=ar_summary[!duplicated(ar_summary),]
+
+# create metadata
+generate_ids=function(list_in){
+  tmp_list=which( colnames(sampleDF) %ni% list_in ) -1
+  return(tmp_list)
+}
+id_nums=generate_ids(c("specimen_id","wgs_id","srr_id",
+                       "wgs_date_put_on_sequencer","run_id","auto_qc_outcome"))
+tax_nums=generate_ids(c("specimen_id","species","sequence_classification",
+                        "mlst_1","gamma_beta_lactam_resistance_genes"))
+qc_nums=generate_ids(c("specimen_id","estimated_coverage","genome_length",
+                        "auto_qc_failure_reason"))
+lab_nums=generate_ids(c("specimen_id","species","lab_results"))
+sample_meta=SharedData$new(sampleDF)
+passed_meta=SharedData$new(subset(sampleDF,auto_qc_outcome=="PASS"))
+```
+
+```{r summarytext, echo=FALSE}
+# generate summary test for outupt
+pass_n=nrow(subset(sampleDF, auto_qc_outcome=="PASS"))
+failed_n=nrow(subset(sampleDF, auto_qc_outcome!="PASS"))
+failed_samples=subset(sampleDF, auto_qc_outcome!="PASS")$specimen_id
+summaryTEXT=paste0("There were ", nrow(sampleDF)," samples analyzed and ",
+                   pass_n, " samples passed quality control thresholds, while ",
+                   length(failed_samples)," failed.")
+if(failed_n>0){
+  summaryTEXT=paste0(summaryTEXT,
+                     " Failing samples included: ",
+                     paste(failed_samples,collapse=" | "),".")
+}
+```
+
+Information {data-orientation=columns data-icon="fa-info-circle"}
+=================================================================
+Column {data-width=600}
+-----------------------
+### `r subHeaderText` 
+```{r intro}
+# create table
+colnames(headerDF) <- c("REPORT DATE","PROJECT NAME","PREPARED BY")
+
+# plot table
+pander(headerDF)
+```
+
+### METHODS
+`r methodsTEXT`
+Column {data-width=600}
+-----------------------
+### Summary
+`r summaryTEXT`
+
+### DISCLAIMER
+`r disclaimerTEXT`
+
+Datatables {data-orientation=columns data-icon="ion-search"}
+=================================================================
+
+Input {.sidebar}
+-----------------------------------------------------------------------
+
+### Filters 
+```{r filter}
+filter_select(
+  id="auto_qc_outcome",
+  label = "QC Status",
+  sharedData = sample_meta,
+  group = ~auto_qc_outcome
+)
+filter_select(
+  id="run_id",
+  label = "Run ID",
+  sharedData = sample_meta,
+  group = ~run_id
+)
+```
+
+Raw {data-width=700 .tabset}
+-----------------------------------------------------------------------
+### Sample
+
+```{r ids, echo=FALSE}
+sample_meta %>%
+  DT::datatable(
+    extensions = c("Buttons","Scroller"),
+    rownames=FALSE,
+    style="bootstrap",
+    width="100%",
+    class="compact",
+    options=list(
+      dom="Blrtrip",
+      deferREander=TRUE,
+      columnDefs=list(
+        list(
+          visible=FALSE,
+          targets=id_nums
+        )
+      ),
+      buttons = list(I("colvis"),"csv","excel")
+      ),
+    colnames = c(
+      "ID" = "specimen_id",
+      "WGS" = "wgs_id",
+      "SRR" = "srr_id",
+      "SeqDate" = "wgs_date_put_on_sequencer",
+      "RunID" = "run_id",
+      "QC" = "auto_qc_outcome"
+    )
+  )
+```
+
+### Taxonomy
+```{r tax, echo=FALSE}
+sample_meta %>%
+  DT::datatable(
+    extensions = c("Buttons","Scroller"),
+    rownames=FALSE,
+    style="bootstrap",
+    width="100%",
+    class="compact",
+    options=list(
+      dom="Blrtrip",
+      deferREander=TRUE,
+      columnDefs=list(
+        list(
+          visible=FALSE,
+          targets=tax_nums
+        )
+      ),
+      buttons = list(I("colvis"),"csv","excel")
+      ),
+    colnames = c(
+      "ID" = "specimen_id",
+      "Species" = "species",
+      "SeqClass" = "sequence_classification",
+      "SeqDate" = "wgs_date_put_on_sequencer",
+      "MLST1" = "mlst_1",
+      "bLac Genes" = "gamma_beta_lactam_resistance_genes"
+    )
+  )
+```
+
+### QC
+```{r qc, echo=FALSE}
+sample_meta %>%
+  DT::datatable(
+    extensions = c("Buttons","Scroller"),
+    rownames=FALSE,
+    style="bootstrap",
+    width="100%",
+    class="compact",
+    options=list(
+      dom="Blrtrip",
+      deferREander=TRUE,
+      columnDefs=list(
+        list(
+          visible=FALSE,
+          targets=qc_nums
+        )
+      ),
+      buttons = list(I("colvis"),"csv","excel")
+      ),
+    colnames = c(
+      "ID" = "specimen_id",
+      "Coverage" = "estimated_coverage",
+      "GenomeLength" = "genome_length",
+      "QC Fail" = "auto_qc_failure_reason"
+    )
+  )
+```
+
+### ARGene Table
+```{r ar_table}
+if(exists('ar_summary')){
+  
+  # determine gene consensus at 50%
+  number_of_samples=round(length(unique(ar_summary$Sample))*.5+.5,0)
+  output_df=data.frame()
+  for (geneID in unique(ar_summary$Gene)){
+    tmp_df=subset(ar_summary,Gene==geneID)
+    if (nrow(tmp_df)>number_of_samples-1){
+      if (nrow(output_df)==0){
+        output_df=tmp_df
+      } else{
+        output_df=rbind(tmp_df,output_df)
+      }
+    }
+  }
+  
+  # if there are consensus genes then print table
+  if (nrow(output_df)==0){
+    print("There are no genes with consensus between at least 50% of samples")
+  } else{
+    # strip rownames, order by gene name
+    row.names(output_df) <- NULL
+    output_df <- output_df[order(output_df$Gene),]
+    DT::datatable(output_df,
+          rownames = FALSE,
+          extensions = 'RowGroup',
+          options = list(rowGroup = list(dataSrc=c(1)),
+                         columnDefs = list(list(visible=FALSE, targets=c(1)))
+                         )
+          )
+  }
+}
+```
+
+### Lab Concordance
+```{r lab_conc, echo=FALSE}
+sample_meta %>%
+  DT::datatable(
+    extensions = c("Buttons","Scroller"),
+    rownames=FALSE,
+    style="bootstrap",
+    width="100%",
+    class="compact",
+    options=list(
+      dom="Blrtrip",
+      deferREander=TRUE,
+      columnDefs=list(
+        list(
+          visible=FALSE,
+          targets=lab_nums
+        )
+      ),
+      buttons = list(I("colvis"),"csv","excel")
+      ),
+    colnames = c(
+      "ID" = "specimen_id",
+      "PipelineResults" = "species",
+      "LabResults" = "lab_results"
+    )
+  )
+```
+
+Analysis {data-orientation=columns data-icon="ion-android-options"}
+=================================================================
+Column {data-width=800 .tabset}
+-----------------------------------------------------------------------
+### Taxonomy
+```{r counts}
+subset(sampleDF,auto_qc_outcome=="PASS")%>%
+ggplot(aes(x = species,fill=species)) +
+  geom_bar() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+### ARGene Summary
+```{r ar_summary}
+# if there are consensus genes then print table
+if (nrow(output_df)==0){
+  print("There are no genes with consensus between at least 50% of samples")
+} else{
+  # update names
+  output_df$Sample=gsub(paste0("-",projectname),"",output_df$Sample)
+
+  merge(sampleDF,output_df, by.x="specimen_id",
+    by.y="Sample")[,c("specimen_id","Gene","species","run_id")] %>% 
+    ggplot(aes(x = Gene,fill=species)) +
+    geom_bar() + 
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    facet_grid(~run_id)
+}
+```
+
+Column {data-width=300}
+-----------------------------------------------------------------------
+### Notes
+
+#### ARGene
+`r config$ar_gene_summary.text`

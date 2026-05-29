@@ -24,6 +24,8 @@ check_intervals=(1800)
 max_restarts=2
 POLL_INTERVAL=15
 NUM_STAGES=1
+RESTART_COOLDOWN=300   # minimum seconds between restarts
+MIN_DISK_FREE_GB=10    # trigger nextflow clean when free space drops below this
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$WATCHDOG_LOG"
@@ -50,6 +52,7 @@ load_state() {
   last_progress_count=-1
   stalled_intervals=0
   restart_count=0
+  last_restart_at=0
   if [[ -f "$STATE_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$STATE_FILE"
@@ -65,11 +68,20 @@ last_checkin_at=$last_checkin_at
 last_progress_count=$last_progress_count
 stalled_intervals=$stalled_intervals
 restart_count=$restart_count
+last_restart_at=${last_restart_at:-0}
 EOF
 }
 
 stage_log_path()  { echo "$LOG_DIR/stage_${1}_${stages[$1]}.log"; }
 stage_exit_path() { echo "$LOG_DIR/stage_${1}_${stages[$1]}.exit"; }
+
+disk_free_gb() {
+  df / | awk 'NR==2 {printf "%d", $4/1024/1024}'
+}
+
+disk_is_low() {
+  (( $(disk_free_gb) < MIN_DISK_FREE_GB ))
+}
 
 stage_log_has_disk_error() {
   grep -q "No space left on device" "$(stage_log_path "$1")" 2>/dev/null
@@ -77,7 +89,7 @@ stage_log_has_disk_error() {
 
 clean_work_dir() {
   local idx="$1"
-  log "Disk space error detected for ${stages[$idx]} — running nextflow clean"
+  log "Disk space low for ${stages[$idx]} — running nextflow clean (free: $(disk_free_gb)GB)"
   (cd "$SCRIPT_DIR" && "$NF_BIN" clean -f -but last >> "$WATCHDOG_LOG" 2>&1) || true
   log "nextflow clean done; free space: $(df -h / | awk 'NR==2{print $4}')"
 }
@@ -112,7 +124,6 @@ start_stage() {
   stage_started_at=$(date +%s)
   last_progress_count=-1
   stalled_intervals=0
-  restart_count=0
   save_state
 }
 
@@ -138,8 +149,16 @@ investigate_stall() {
 
 restart_stage() {
   local idx="$1"
-  local sexit
+  local now sexit
+  now=$(date +%s)
   sexit="$(stage_exit_path "$idx")"
+
+  # Enforce cooldown between restarts
+  if (( last_restart_at > 0 )) && (( now - last_restart_at < RESTART_COOLDOWN )); then
+    local wait_secs=$(( RESTART_COOLDOWN - (now - last_restart_at) ))
+    log "Restart cooldown: waiting ${wait_secs}s before restarting ${stages[$idx]}"
+    sleep "$wait_secs"
+  fi
 
   if [[ -n "${stage_pid:-}" ]] && ps -p "$stage_pid" >/dev/null 2>&1; then
     kill "$stage_pid" 2>/dev/null || true
@@ -149,7 +168,14 @@ restart_stage() {
 
   pkill -9 -f "nextflow.*$PROJECT" >/dev/null 2>&1 || true
   rm -f "$sexit"
+
+  # Always check disk before restarting
+  if disk_is_low || stage_log_has_disk_error "$idx"; then
+    clean_work_dir "$idx"
+  fi
+
   restart_count=$((restart_count + 1))
+  last_restart_at=$(date +%s)
   log_error "Stage ${stages[$idx]} stalled or failed" "Restart #$restart_count"
   log "Restarting ${stages[$idx]} (restart #$restart_count of $max_restarts)"
   start_stage "$idx"
@@ -219,10 +245,6 @@ while true; do
     } >> "$ERROR_LOG"
     investigate_stall "$idx"
 
-    if stage_log_has_disk_error "$idx"; then
-      clean_work_dir "$idx"
-    fi
-
     if (( restart_count < max_restarts )); then
       restart_stage "$idx"
     else
@@ -235,7 +257,13 @@ while true; do
   # ── Periodic progress check at stage-specific interval ──────────────────
   if (( now - last_checkin_at >= interval )); then
     progress_count=$(stage_progress_count "$idx")
-    log "CHECK-IN [${stages[$idx]}] pid=${stage_pid:-none} files=$progress_count interval=${interval}s"
+    log "CHECK-IN [${stages[$idx]}] pid=${stage_pid:-none} files=$progress_count free=$(disk_free_gb)GB interval=${interval}s"
+
+    # Proactive disk cleanup at every check-in if space is low
+    if disk_is_low; then
+      log "WARN: disk space low ($(disk_free_gb)GB free < ${MIN_DISK_FREE_GB}GB threshold)"
+      clean_work_dir "$idx"
+    fi
 
     if (( last_progress_count >= 0 )) && (( progress_count <= last_progress_count )); then
       stalled_intervals=$((stalled_intervals + 1))

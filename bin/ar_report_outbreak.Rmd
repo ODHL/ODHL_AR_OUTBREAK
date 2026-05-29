@@ -1,0 +1,419 @@
+---
+title: "Public Health Whole Genome Sequencing Analysis Report"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    navbar:
+      - { title: "ODHL", href: "https://odh.ohio.gov/know-our-programs/microbiology/microbiology", align_right}
+    logo: "odh_logo_240128.png"
+params:
+  configFILE: "REP_CONFIG"
+  sampletable: "REP_SAMPLETABLE"
+  snpmatrix: "REP_SNPMATRIX"
+  tree: "REP_IQTREE"
+  cgstats: "REP_CGSTATS"
+  arpredictions: "REP_PREDICT"
+  metadata: "REP_META"
+  testing: "N"
+  obid: "REP_OB"
+  date: "REP_DATE"
+  refs: "REF_REFSAMPLES"
+  dblookup: "REP_DBLOOKUP"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libs, echo=FALSE, include=FALSE, warning=FALSE, message=FALSE}
+library(ape)
+library(argparser)
+library(crosstalk)
+library(DT)
+library(flexdashboard)
+library(ggplot2)
+library(ggpubr)
+library(ggtree)
+library(heatmaply)
+library(htmlwidgets)
+library(kableExtra)
+library(lubridate)
+library(pander)
+library(phytools)
+library(plotly)
+library(RColorBrewer)
+library(rgl)
+library(rmarkdown)
+library(yaml)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+options(rgl.useNULL = TRUE)
+'%ni%' <- function(x,y)!('%in%'(x,y))
+```
+
+```{r args, echo=FALSE, warning=FALSE}
+username <- "S. Chill"
+reporttype <- "Outbreak"
+
+if (params$testing == "N"){
+  configFILE    <- params$configFILE
+  sampletable   <- params$sampletable
+  snpmatrix     <- params$snpmatrix
+  tree          <- params$tree
+  cgstats       <- params$cgstats
+  arpredictions <- params$arpredictions
+  metadata      <- params$metadata
+  obid          <- params$obid
+  date          <- params$date
+  refpath       <- params$refs
+  dblookup      <- params$dblookup
+} else {
+  obid          <- "OH-M6588-231201"
+  date          <- "12/18/23"
+  sampletable   <- "final_report.csv"
+  snpmatrix     <- "snp_distance_matrix.tsv"
+  tree          <- "core_genome.tree"
+  cgstats       <- "core_genome_statistics.txt"
+  arpredictions <- "ar_predictions.tsv"
+  metadata      <- "manifest.csv"
+  refpath       <- "ref_samples.csv"
+  dblookup      <- "db_lookup.csv"
+}
+```
+
+```{r prep, echo=FALSE, warning=FALSE}
+config <- read_yaml(configFILE)
+subHeaderText <- paste0(config$sub.title, ": ", reporttype)
+headerDF <- data.frame(date = date, ob = obid, project = obid, name = username)
+summaryTEXT    <- config$summary.paragraph
+disclaimerTEXT <- config$disclaimer.text
+methodsTEXT    <- config$methods.text
+referenceTEXT  <- config$reference.text
+rootMethod <- config$root.method
+```
+
+```{r read, echo=FALSE}
+# Read in reference IDs
+reference_list <- read.csv(refpath, header = FALSE)
+ref_ids <- trimws(reference_list$V1)
+
+# Read in sample metadata
+sampleDF <- subset(read.csv(sampletable, stringsAsFactors = FALSE),
+                   specimen_id!="")
+
+# Simplify specimen IDs
+sampleDF$specimen_id <- sub("-.*$", "", sampleDF$specimen_id)
+
+# Remove ref samples from sampleDF so only source samples are counted/displayed
+sampleDF <- subset(sampleDF, !(specimen_id %in% ref_ids))
+
+# Add metadata to sampleDF
+rownames(sampleDF) <- sampleDF$specimen_id
+metadataDF <- read.csv(metadata, stringsAsFactors = FALSE)
+needed  <- c("specimen_id","isolation_source","pt_county","healthcare_origin","submitter_name","collect_date")
+missing <- setdiff(needed, names(metadataDF))
+for (m in missing) metadataDF[[m]] <- NA_character_
+
+# Merge metadata (left join — keep only samples with analysis data)
+sampleDF <- merge(sampleDF, metadataDF[, needed], by = "specimen_id", all.x = TRUE)
+rownames(sampleDF) <- NULL
+
+# Format some columns
+sampleDF$collect_date <- sapply(strsplit(as.character(sampleDF$collect_date), "/"), `[`, 1)
+
+# Fill srr_id / samn_id / seq_date from db_lookup (pre-extracted non-OB entries from db_master)
+sampleDF$seq_date <- as.Date(NA)
+if (file.exists(dblookup)) {
+  dbm <- read.csv(dblookup, stringsAsFactors = FALSE)
+  dbm <- dbm[!duplicated(dbm$OHIO_ID), ]
+  sampleDF <- merge(sampleDF, dbm, by.x = "specimen_id", by.y = "OHIO_ID", all.x = TRUE)
+  sampleDF$srr_id  <- ifelse(sampleDF$srr_id  == "" | sampleDF$srr_id  == "NO_ID" | is.na(sampleDF$srr_id),
+                              sampleDF$SRRID, sampleDF$srr_id)
+  sampleDF$samn_id <- ifelse(sampleDF$samn_id == "" | sampleDF$samn_id == "NO_ID" | is.na(sampleDF$samn_id),
+                              sampleDF$SAMID, sampleDF$samn_id)
+  sampleDF$seq_date <- as.Date(as.character(sampleDF$DATE_ASSIGNED), format = "%Y%m%d")
+  sampleDF$SRRID <- NULL
+  sampleDF$SAMID <- NULL
+  sampleDF$DATE_ASSIGNED <- NULL
+}
+# Keep SRR blank when unavailable; do not substitute specimen IDs in the SRR column.
+sampleDF$srr_id <- ifelse(is.na(sampleDF$srr_id) | sampleDF$srr_id == "NO_ID" | sampleDF$srr_id == "",
+                           NA_character_, sampleDF$srr_id)
+
+# Read in other data
+snpData <- read.csv(snpmatrix, sep = "\t", check.names = FALSE, row.names = 1)
+treepath <- tree
+cgstats <- read.csv(cgstats, sep = "\t", header = FALSE)
+ar_summary <- read.csv(arpredictions, sep = "\t", check.names = FALSE)
+ar_summary$Sample <- gsub("_[0-9]{1,4}_length_[0-9]*","", ar_summary$Sample)
+ar_summary <- ar_summary[!duplicated(ar_summary), ]
+
+# Prepare IDs for hiding columns in DT
+generate_ids <- function(list_in) which(colnames(sampleDF) %ni% list_in) - 1
+id_nums  <- generate_ids(c("auto_qc_outcome","specimen_id","lab_results","srr_id","samn_id","wgs_id","mlst1","healthcare_origin","seq_date"))
+tax_nums <- generate_ids(c("specimen_id","species","sequence_classification","mlst_1","gamma_beta_lactam_resistance_genes"))
+qc_nums  <- generate_ids(c("specimen_id","estimated_coverage","genome_length","auto_qc_failure_reason"))
+strip_repeat_suffix <- function(x) sub("repeat$", "", x, ignore.case = TRUE)
+sampleDF_display <- sampleDF
+sampleDF_display$specimen_id <- strip_repeat_suffix(sampleDF_display$specimen_id)
+sample_meta <- crosstalk::SharedData$new(sampleDF_display)
+```
+
+```{r summarytext, echo=FALSE}
+pass_n        <- nrow(subset(sampleDF, auto_qc_outcome == "PASS"))
+failed_n      <- nrow(subset(sampleDF, auto_qc_outcome != "PASS"))
+failed_samples<- strip_repeat_suffix(subset(sampleDF, auto_qc_outcome != "PASS")$specimen_id)
+ref_samples   <- length(ref_ids)
+
+summaryTEXT <- paste0("There were ", nrow(sampleDF)," samples analyzed and ",
+                     pass_n, " samples passed quality control thresholds, while ",
+                     length(failed_samples)," failed.")
+if (failed_n > 0){
+  summaryTEXT <- paste0(summaryTEXT,
+                       " Failing samples included: ",
+                       paste(failed_samples, collapse = " | "), ".")
+}
+summaryTEXT <- paste0(summaryTEXT,
+                      " An additional ", ref_samples, " samples were used for reference (ODHL_ref, REF).")
+```
+
+Information {data-orientation=columns data-icon="fa-info-circle"}
+=================================================================
+Column {data-width=600}
+-----------------------
+### `r subHeaderText` 
+```{r intro}
+colnames(headerDF) <- c("REPORT DATE","OUTBREAK ID","PROJECT NAME","PREPARED BY")
+pander(headerDF)
+```
+
+### METHODS
+`r methodsTEXT`
+`r config$tree.text`
+`r if(exists('treepath') & exists('cgstats')){paste("Core Genes Identified: ",cgstats[cgstats$V1 == 'Core genes',3],'\n')}`
+`r if(exists('treepath') & exists('cgstats')){paste("Total Genes Identified: ",cgstats[cgstats$V1 == 'Total genes',3])}`
+
+Column {data-width=600}
+-----------------------
+### Summary
+`r summaryTEXT`
+
+`r referenceTEXT`
+
+### DISCLAIMER
+`r disclaimerTEXT`
+
+Analysis {data-icon="ion-search"}
+=================================================================
+
+Column {data-width=38}
+----------------------
+
+### Samples Table
+
+```{r ids, echo=FALSE}
+sample_meta %>%
+  DT::datatable(
+    extensions = c("Buttons","Scroller","FixedHeader"),
+    rownames = FALSE,
+    style = "bootstrap",
+    width = "100%",
+    class = "compact",
+    options = list(
+      dom = "Blfrtip",
+      deferRender = TRUE,
+      scroller = TRUE,
+      scrollY = "70vh",
+      pageLength = 10,
+      fixedHeader = TRUE,
+      columnDefs = list(list(visible = FALSE, targets = id_nums)),
+      buttons = list(I("colvis"), "csv", "excel")
+    ),
+    colnames = c(
+      "QC" = "auto_qc_outcome",
+      "eLIMS_ID" = "specimen_id",
+      "Lab_Results" = "lab_results",
+      "SRR_ID" = "srr_id",
+      "SAMN_ID" = "samn_id",
+      "WGS" = "wgs_id",
+      "MLST" = "mlst_1",
+      "healthcare_origin" = "healthcare_origin",
+      "Seq_Date" = "seq_date"
+    )
+  )
+```
+
+Column {data-width=62}
+----------------------
+
+### Phylogenetic Tree
+
+```{r treeparams}
+if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
+  set.seed(42)
+  tree <- ape::read.tree(treepath)
+  count <- 1
+  for (i in seq_along(tree$tip.label)) {
+    fullID <- tree$tip.label[i]
+    id <- sub("-.*$", "", fullID, perl = TRUE)
+    if (exists("ref_ids") && id %in% ref_ids) {
+      tree$tip.label[i] <- paste0("ref", count)
+      count <- count + 1
+    } else {
+      tree$tip.label[i] <- id
+    }
+  }
+  if (rootMethod == 'midpoint') tree <- midpoint.root(tree)
+  else if (rootMethod != 'unrooted') {
+    node <- match(rootMethod, tree$tip.label)
+    if (!is.na(node)) tree <- reroot(tree, node)
+  }
+}
+```
+
+#### Ancestral Tree
+```{r treepruned}
+if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
+  x <- fastBM(tree)
+  obj <- contMap(tree, x)
+  plot(obj, type = "fan", lwd = 2, fsize = c(.8, .5))
+} else {
+  print("Not enough difference at 80% conformity")
+}
+```
+
+#### Cladogram
+```{r tree, message=FALSE}
+if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
+  p <- ggtree(tree, branch.length = "none") + layout_dendrogram()
+  d <- p$data; bs <- d[!d$isTip,]; bs$label <- as.numeric(bs$label)
+  ggtree_plot <- p + geom_text(data = bs, aes(label = label, vjust = 1.2), size = 2)
+  rownames(sampleDF) <- sampleDF$specimen_id
+  sampleDF$ref <- as.integer(factor(sampleDF$healthcare_origin, levels = unique(sampleDF$healthcare_origin)))
+  labels <- p$data$label[p$data$label %ni% bs$label]
+  d <- data.frame(label = labels, 
+                  ref   = sampleDF[labels, c("ref")],
+                  mlst  = ifelse(is.na(sampleDF[labels, c("mlst_1")]), "Ref",
+                                 sampleDF[labels, c("mlst_1")]))
+  ggtree_plot %<+% d +
+    layout_dendrogram() +
+    geom_tippoint(aes(fill = factor(mlst), x = x + .5), size = 6, shape = 21, color = 'black') +
+    geom_tiplab(aes(label = ref), size = 2.5, offset = -.4, color = 'black') +
+    geom_tiplab(aes(label = strip_repeat_suffix(label)), hjust = 1, offset = -1.5, show.legend = FALSE) +
+    theme_dendrogram(plot.margin = margin(0, 0, 80, 0))
+}
+```
+
+Advanced Analysis {data-icon="fa-calendar"}
+=================================================================
+
+Column {data-width=38}
+-----------------------
+
+### AMR Gene Presence (beta-lactams) {data-height=550}
+
+```{r amrtable, echo=FALSE}
+src_ar <- ar_summary[, c("Sample", "Gene")]
+src_ar$Sample <- sub("-.*$", "", src_ar$Sample)
+src_ar <- src_ar[src_ar$Sample %in% sampleDF$specimen_id & grepl("^bla", src_ar$Gene), ]
+src_ar <- src_ar[!duplicated(src_ar), ]
+all_genes <- sort(unique(src_ar$Gene))
+amr_matrix <- data.frame(Sample = sampleDF$specimen_id, stringsAsFactors = FALSE)
+for (g in all_genes) {
+  amr_matrix[[g]] <- ifelse(amr_matrix$Sample %in% src_ar$Sample[src_ar$Gene == g], "X", "")
+}
+amr_matrix$Sample <- strip_repeat_suffix(amr_matrix$Sample)
+DT::datatable(
+  amr_matrix,
+  rownames = FALSE,
+  style = "bootstrap",
+  width = "100%",
+  class = "compact cell-border",
+  extensions = c("Buttons", "FixedColumns"),
+  options = list(
+    dom = "Bt",
+    scrollX = TRUE,
+    scrollY = "400px",
+    fixedColumns = list(leftColumns = 1),
+    pageLength = nrow(amr_matrix),
+    buttons = list("csv", "excel"),
+    columnDefs = list(list(className = "dt-center", targets = seq_len(length(all_genes))))
+  )
+)
+```
+
+### SNP Distance: Within-Outbreak vs Reference {data-height=450}
+
+```{r snpdist, echo=FALSE}
+if (exists("snpData") && length(ref_ids) > 0) {
+  mat_names <- rownames(snpData)
+  short_names <- sub("-.*$", "", mat_names)
+  get_mat_id <- function(ids) {
+    sapply(ids, function(id) {
+      idx <- which(short_names == id)
+      if (length(idx) > 0) mat_names[idx[1]] else NA_character_
+    })
+  }
+  src_mat <- get_mat_id(sampleDF$specimen_id)
+  ref_mat <- get_mat_id(ref_ids)
+  src_mat <- src_mat[!is.na(src_mat)]
+  ref_mat <- ref_mat[!is.na(ref_mat)]
+
+  src_snp  <- as.matrix(snpData[src_mat, src_mat])
+  src_vals <- src_snp[upper.tri(src_snp)]
+  ref_vals <- as.numeric(as.matrix(snpData[src_mat, ref_mat, drop = FALSE]))
+
+  dist_df <- data.frame(
+    distance = c(src_vals, ref_vals),
+    group = factor(
+      c(rep("Within Outbreak", length(src_vals)),
+        rep("Source vs Reference", length(ref_vals))),
+      levels = c("Within Outbreak", "Source vs Reference")
+    )
+  )
+  within_range <- paste0("Range: ", min(src_vals), "\u2013", max(src_vals), " SNPs")
+  ref_range    <- paste0("Range: ", min(ref_vals), "\u2013", max(ref_vals), " SNPs")
+  plot_ly(dist_df, x = ~group, y = ~distance, type = "violin",
+          color = ~group, colors = c("#2196F3", "#F44336"),
+          box = list(visible = TRUE),
+          meanline = list(visible = TRUE),
+          points = "all", jitter = 0.3,
+          pointpos = 0) %>%
+    layout(xaxis = list(title = ""),
+           yaxis = list(title = "Pairwise SNP Distance"),
+           showlegend = FALSE,
+           margin = list(t = 20),
+           annotations = list(
+             list(x = "Within Outbreak",     y = max(src_vals), text = within_range,
+                  showarrow = FALSE, yshift = 10, font = list(size = 11)),
+             list(x = "Source vs Reference", y = max(ref_vals), text = ref_range,
+                  showarrow = FALSE, yshift = 10, font = list(size = 11))
+           ))
+} else {
+  print("SNP data not available")
+}
+```
+
+Column {data-width=62}
+-----------------------
+
+### Cladogram by Sequencing Month
+```{r tree_month, message=FALSE}
+if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
+  p2 <- ggtree(tree, branch.length = "none") + layout_dendrogram()
+  d2 <- p2$data; bs2 <- d2[!d2$isTip,]; bs2$label <- as.numeric(bs2$label)
+  ggtree_plot2 <- p2 + geom_text(data = bs2, aes(label = label, vjust = 1.2), size = 2)
+  rownames(sampleDF) <- sampleDF$specimen_id
+  labels2 <- p2$data$label[p2$data$label %ni% bs2$label]
+  month_val <- ifelse(
+    labels2 %in% sampleDF$specimen_id & !is.na(sampleDF[labels2, "seq_date"]),
+    format(as.Date(sampleDF[labels2, "seq_date"]), "%Y-%m"),
+    "Ref"
+  )
+  d2 <- data.frame(label = labels2, month = month_val)
+  ggtree_plot2 %<+% d2 +
+    layout_dendrogram() +
+    geom_tippoint(aes(fill = factor(month), x = x + .5), size = 6, shape = 21, color = 'black') +
+    geom_tiplab(aes(label = strip_repeat_suffix(label)), hjust = 1, offset = -1.5, show.legend = FALSE) +
+    theme_dendrogram(plot.margin = margin(0, 0, 80, 0)) +
+    labs(fill = "Seq Month")
+}
+```

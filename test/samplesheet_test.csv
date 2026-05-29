@@ -1,0 +1,5 @@
+sample,fastq_1,fastq_2
+ODHL_sample1,test/fastq/ODHL_sample1.R1.fastq.gz,test/fastq/ODHL_sample1.R2.fastq.gz
+ODHL_sample2,test/fastq/ODHL_sample2.R1.fastq.gz,test/fastq/ODHL_sample2.R2.fastq.gz
+ODHL_sample3,test/fastq/ODHL_sample3.R1.fastq.gz,test/fastq/ODHL_sample3.R2.fastq.gz
+ODHL_sample4,test/fastq/ODHL_sample4.R1.fastq.gz,test/fastq/ODHL_sample4.R2.fastq.gz

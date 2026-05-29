@@ -1,0 +1,2 @@
+accession	study	object_status	bioproject_accession	biosample_accession	sample_name	library_ID	title	library_strategy	library_source	library_selection	library_layout	platform	instrument_model	design_description	filetype	filename	filename2	filename3	filename4	assembly	fasta_file
+SRRfakeID4	SRPfakeID4	new	PRJNA288601	SAMNfake4	2099ZN-0004	2099ZN-0004	Illumina Sequencing of 2099ZN-0004	WGS	Genomic	Random	Paired	Illumina	NextSeq 1000	WGS by Illumina MiSeq using Illumina DNA Prep library prep	fastq	ODHL_sample4.R1.fastq.gz	ODHL_sample4.R2.fastq.gz			

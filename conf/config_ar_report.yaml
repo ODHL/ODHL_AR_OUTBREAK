@@ -1,0 +1,48 @@
+# ar_report_generator configuration file
+# note: please use spaces instead of tabs, indentation for .text blocks is two spaces
+
+### report format ###
+logo: 'odh_logo_240127.png'
+
+# output fromat, must be one of the following: 'html', 'word', 'both'
+outformat: 'html'
+
+# path to your installation of Python
+# only used when generating a word document
+# default set to Python path in the report generator's Docker container
+py.path: '/usr/local/bin/python3.8'
+
+### main report text ###
+sub.title: 'Antimicrobial Resistance Report'
+summary.paragraph: |
+  This report describes the relatedness between a set of bacterial genomes.
+methods.text: |
+  The figures shown here were generated using sequence data processed with the [ODH AR](https://github.com/ODHL/AST_Workflow) data analysis pipeline. If you have questions about this report please contact [Samantha Chill](samantha.chill@odh.ohio.gov).
+  The following databases are utilized to generate the data within this report:
+ 
+  1) [AMRFinderPlus database](https://ftp.ncbi.nlm.nih.gov/pathogen/Antimicrobial_resistance/AMRFinderPlus/database/): [Version 2023-04-17.1](https://ftp.ncbi.nlm.nih.gov/pathogen/Antimicrobial_resistance/AMRFinderPlus/database/3.11/)
+ 
+  2) [ARG-ANNOT database](http://backup.mediterranee-infection.com/arkotheque/client/ihumed/_depot_arko/articles/2041/arg-annot-v4-aa-may2018_doc.fasta): [Latest version NT v6 July 2019](https://www.mediterranee-infection.com/acces-ressources/base-de-donnees/arg-annot-2/)
+ 
+  3) [ResFinder database](https://bitbucket.org/genomicepidemiology/resfinder_db/src/master/): [v2.1.0](https://bitbucket.org/genomicepidemiology/resfinder_db/commits/branch/master) including until 2023-04-12 commit f46d8fc
+ 
+  4) [MLST database](https://github.com/tseemann/mlst): static db generated from [PubMLST.org](https://pubmlst.org/) 2023-05-02
+ 
+  5) [Kraken database](https://ccb.jhu.edu/software/kraken2/): [standard-8 db](https://benlangmead.github.io/aws-indexes/k2)
+disclaimer.text: |
+  The information included in this report should only be used to support infection prevention measures. This report should not be used to guide treatment decisions, nor should it be included in the patient record.
+  Whole-genome sequencing analysis is a rapidly evolving technology. Whole-genome sequencing and single nucleotide variant analysis will continue to be adjusted and refined over time due to the varied nature of bacterial genomes, limitations on available reference genomes and continual assessment of the inclusion of mobile genetic elements in this analysis. These results represent the most advanced method currently available for genome comparisons.
+heatmap.text: |
+  The number of Single Nucleotide Polymorphisms (SNPs) between each sample is shown on the heatmap below. The samples are ordered based on the Euclidean distance between each sample. Column and row colors indicate species.
+heatmap.outbreak.text: |
+  The number of Single Nucleotide Polymorphisms (SNPs) between each sample is shown on the heatmap below. The samples are ordered based on the Euclidean distance between each sample. Column colors indicate species. Row colors first indicate projectID and second, indicate species.
+tree.text: |
+  Phylogenetic trees visualize the relatedness and genetic diversity of samples. Closely related samples will generally share a recent common ancestor. Three different types of trees are presented.
+ar_gene_summary.text: |
+  This report shows a summary of all antimicrobial resistance genes detected using the ODH [AR pipeline](https://github.com/ODHL/AR_Workflow).
+
+# tree rooting method, must be one of the following: 
+# 'midpoint', 'unrooted', or a sample id
+root.method: "midpoint"
+show.bootstrap: TRUE
+bootstrap.threshold: 80
