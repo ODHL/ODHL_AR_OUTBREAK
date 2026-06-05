@@ -25,13 +25,11 @@ helpFunction() {
    echo "  -n  nextflowParams     Additional Nextflow parameters (default: -profile docker,test --max_memory 7.GB --max_cpus 4)"
    echo "  -r  resume             Resume previous run: Y or N (default: Y)"
    echo "  -l  labResults         Path to lab results CSV"
-   echo "  -d  metadata_NCBI      Path to NCBI metadata CSV"
-   echo "  -o  output_NCBI        Path to NCBI output TSV (accession lookup)"
    echo "  -f  ref_samples        Path to reference samples CSV"
    exit 1
 }
 
-while getopts "i:s:g:m:p:n:r:l:d:o:f:" opt; do
+while getopts "i:s:g:m:p:n:r:l:f:" opt; do
    case "$opt" in
       i ) project_id="$OPTARG" ;;
       s ) samplesheet="$OPTARG" ;;
@@ -41,8 +39,6 @@ while getopts "i:s:g:m:p:n:r:l:d:o:f:" opt; do
       n ) nextflowParams="$OPTARG" ;;
       r ) resume="$OPTARG" ;;
       l ) labResults="$OPTARG" ;;
-      d ) metadata_NCBI="$OPTARG" ;;
-      o ) output_NCBI="$OPTARG" ;;
       f ) ref_samples="$OPTARG" ;;
       ? ) helpFunction ;;
    esac
@@ -79,8 +75,6 @@ if [ -z "$resume" ] || [ "$resume" == "Y" ]; then
 fi
 
 if [ ! -z "$labResults" ];    then nextflowParams="$nextflowParams --labResults $labResults"; fi
-if [ ! -z "$metadata_NCBI" ]; then nextflowParams="$nextflowParams --metadata_NCBI $metadata_NCBI"; fi
-if [ ! -z "$output_NCBI" ];   then nextflowParams="$nextflowParams --output_NCBI $output_NCBI"; fi
 if [ ! -z "$ref_samples" ];   then nextflowParams="$nextflowParams --ref_samples $ref_samples"; fi
 
 #############################################################################################

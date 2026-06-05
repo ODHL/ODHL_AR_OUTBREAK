@@ -6,8 +6,7 @@
 include { CREATE_PHOENIX_SUMMARY            } from '../modules/local/create_phoenix_summary'
 include { POST_PROCESS                      } from '../modules/local/post_process'
 include { ID_DB                             } from '../modules/local/id_db'
-include { NCBI_PREP                         } from '../modules/local/ncbi_prep'
-include { NCBI_POST                         } from '../modules/local/ncbi_post'
+include { NO_NCBI_POST                      } from '../modules/local/no_ncbi_post'
 include { REPORT_BASIC_PREP                 } from '../modules/local/report_basic_prep'
 include { CFSAN                             } from '../modules/local/cfsan'
 include { ROARY                             } from '../modules/local/roary'
@@ -51,9 +50,6 @@ workflow outbreakANALYZER {
         ch_id_db                 = Channel.fromPath(params.id_db)
         ch_basic_RMD             = Channel.fromPath(params.basic_RMD)
         ch_labResults            = Channel.fromPath(params.labResults)
-        ch_metadata_NCBI         = Channel.fromPath(params.metadata_NCBI)
-        ch_config_NCBI           = Channel.fromPath(params.config_NCBI)
-        ch_output_NCBI           = Channel.fromPath(params.output_NCBI)
         ch_core_functions_script = Channel.fromPath(params.coreFunctions)
         ch_ref_samples           = Channel.fromPath(params.ref_samples)
 
@@ -103,47 +99,20 @@ workflow outbreakANALYZER {
         ch_versions = ch_versions.mix(ID_DB.out.versions)
 
         //////////////////////////////////////////////////////////////////
-        // STEP 5: NCBI PREP
+        // STEP 5: BUILD PLACEHOLDER ACCESSION FILE (NCBI UPLOAD REMOVED)
         //////////////////////////////////////////////////////////////////
-        if (!file("${params.outdir}/basespace").isDirectory()) {
-            all_fastq_files_ncbi = Channel
-                .fromPath("${projectDir}/test/fastq/*fastq.gz")
-                .collect()
-        } else {
-            all_fastq_files_ncbi = Channel
-                .fromPath("${params.outdir}/basespace/*fastq.gz")
-                .collect()
-        }
-
-        NCBI_PREP(
-            ch_core_functions_script,
-            projectID,
-            ch_metadata_NCBI,
-            ch_config_NCBI,
-            ch_id_db,
+        NO_NCBI_POST(
             POST_PROCESS.out.pipeline_results,
-            ID_DB.out.wgs_results,
-            all_fastq_files_ncbi
+            projectID
         )
-        ch_versions = ch_versions.mix(NCBI_PREP.out.versions)
+        ch_versions = ch_versions.mix(NO_NCBI_POST.out.versions)
 
         //////////////////////////////////////////////////////////////////
-        // STEP 6: NCBI POST (update with NCBI accessions)
-        //////////////////////////////////////////////////////////////////
-        NCBI_POST(
-            projectID,
-            ch_id_db,
-            NCBI_PREP.out.ncbi_pre_file,
-            ch_output_NCBI
-        )
-        ch_versions = ch_versions.mix(NCBI_POST.out.versions)
-
-        //////////////////////////////////////////////////////////////////
-        // STEP 7: REPORT BASIC PREP (produces final_report.csv + ar_predictions.tsv)
+        // STEP 6: REPORT BASIC PREP (produces final_report.csv + ar_predictions.tsv)
         //////////////////////////////////////////////////////////////////
         REPORT_BASIC_PREP(
             arANALYZER.out.geneFiles,
-            NCBI_POST.out.ncbi_post_file,
+            NO_NCBI_POST.out.ncbi_post_file,
             POST_PROCESS.out.pipeline_results,
             ch_basic_RMD,
             projectID,
@@ -151,7 +120,7 @@ workflow outbreakANALYZER {
         )
 
         //////////////////////////////////////////////////////////////////
-        // STEP 8: OUTBREAK ANALYSIS - GFF / ROARY / IQTREE2
+        // STEP 7: OUTBREAK ANALYSIS - GFF / ROARY / IQTREE2
         //////////////////////////////////////////////////////////////////
         // Get the filtered sample list from GFF samplesheet
         CREATE_GFF_CHANNEL(samplesheet)
@@ -186,7 +155,7 @@ workflow outbreakANALYZER {
         )
 
         //////////////////////////////////////////////////////////////////
-        // STEP 9: OUTBREAK ANALYSIS - FASTQ / CFSAN SNP
+        // STEP 8: OUTBREAK ANALYSIS - FASTQ / CFSAN SNP
         //////////////////////////////////////////////////////////////////
         // Sample trimmed FASTQs from arANALYZER bbduk output, filtered to samplesheet
         ch_sample_fastqs = arANALYZER.out.bbduk_reads
@@ -214,7 +183,7 @@ workflow outbreakANALYZER {
         )
 
         //////////////////////////////////////////////////////////////////
-        // STEP 10: OUTBREAK REPORT
+        // STEP 9: OUTBREAK REPORT
         //////////////////////////////////////////////////////////////////
         ch_analyzer_results = REPORT_BASIC_PREP.out.finalReport.collect()
         ch_ar_predictions   = REPORT_BASIC_PREP.out.predictions.collect()

@@ -571,7 +571,6 @@ bash "$OB_WF_DIR/run_workflow.sh" \\
   -p "$outbreak_species" \\
   -l "\$INPUT_DIR/labResults.csv" \\
   -f "\$INPUT_DIR/ref_samples.csv" \\
-  -d "\$INPUT_DIR/${PROJECT}_metadata.csv" \\
   -n "-profile docker --max_memory 7.GB --max_cpus 4 --runBASESPACE TRUE"
 EOF
 

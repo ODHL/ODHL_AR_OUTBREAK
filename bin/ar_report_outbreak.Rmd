@@ -24,6 +24,12 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{css report-fonts, echo=FALSE}
+body {
+  font-size: 12px;
+}
+```
+
 ```{r libs, echo=FALSE, include=FALSE, warning=FALSE, message=FALSE}
 library(ape)
 library(argparser)
@@ -94,6 +100,12 @@ rootMethod <- config$root.method
 # Read in reference IDs
 reference_list <- read.csv(refpath, header = FALSE)
 ref_ids <- trimws(reference_list$V1)
+ref_ids <- ref_ids[!is.na(ref_ids) & ref_ids != "" & !grepl("^#", ref_ids)]
+ref_labels <- if (length(ref_ids) > 0) {
+  setNames(paste0("ref", seq_along(ref_ids)), ref_ids)
+} else {
+  character(0)
+}
 
 # Read in sample metadata
 sampleDF <- subset(read.csv(sampletable, stringsAsFactors = FALSE),
@@ -173,6 +185,11 @@ if (failed_n > 0){
 }
 summaryTEXT <- paste0(summaryTEXT,
                       " An additional ", ref_samples, " samples were used for reference (ODHL_ref, REF).")
+
+if (length(ref_labels) > 0) {
+  ref_map_text <- paste(paste0(unname(ref_labels), "=", names(ref_labels)), collapse = " | ")
+  summaryTEXT <- paste0(summaryTEXT, " Reference mapping: ", ref_map_text, ".")
+}
 ```
 
 Information {data-orientation=columns data-icon="fa-info-circle"}
@@ -250,17 +267,18 @@ Column {data-width=62}
 if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
   set.seed(42)
   tree <- ape::read.tree(treepath)
-  count <- 1
+  tree_ref_ids <- character(0)
   for (i in seq_along(tree$tip.label)) {
     fullID <- tree$tip.label[i]
     id <- sub("-.*$", "", fullID, perl = TRUE)
-    if (exists("ref_ids") && id %in% ref_ids) {
-      tree$tip.label[i] <- paste0("ref", count)
-      count <- count + 1
+    if (length(ref_labels) > 0 && id %in% names(ref_labels)) {
+      tree$tip.label[i] <- unname(ref_labels[id])
+      tree_ref_ids <- c(tree_ref_ids, id)
     } else {
       tree$tip.label[i] <- id
     }
   }
+  tree_missing_refs <- setdiff(ref_ids, unique(tree_ref_ids))
   if (rootMethod == 'midpoint') tree <- midpoint.root(tree)
   else if (rootMethod != 'unrooted') {
     node <- match(rootMethod, tree$tip.label)
@@ -274,7 +292,7 @@ if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
 if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
   x <- fastBM(tree)
   obj <- contMap(tree, x)
-  plot(obj, type = "fan", lwd = 2, fsize = c(.8, .5))
+  plot(obj, type = "fan", lwd = 2, fsize = c(.45, .35))
 } else {
   print("Not enough difference at 80% conformity")
 }
@@ -285,20 +303,28 @@ if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
 if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
   p <- ggtree(tree, branch.length = "none") + layout_dendrogram()
   d <- p$data; bs <- d[!d$isTip,]; bs$label <- as.numeric(bs$label)
-  ggtree_plot <- p + geom_text(data = bs, aes(label = label, vjust = 1.2), size = 2)
+  ggtree_plot <- p + geom_text(data = bs, aes(label = label, vjust = 1.2), size = 1.6)
   rownames(sampleDF) <- sampleDF$specimen_id
   sampleDF$ref <- as.integer(factor(sampleDF$healthcare_origin, levels = unique(sampleDF$healthcare_origin)))
   labels <- p$data$label[p$data$label %ni% bs$label]
+  ref_label_idx <- grepl("^ref[0-9]+$", labels)
+  ref_tag <- ifelse(ref_label_idx, "REF", as.character(sampleDF[labels, c("ref")]))
   d <- data.frame(label = labels, 
-                  ref   = sampleDF[labels, c("ref")],
-                  mlst  = ifelse(is.na(sampleDF[labels, c("mlst_1")]), "Ref",
+                  ref   = ref_tag,
+                  mlst  = ifelse(ref_label_idx | is.na(sampleDF[labels, c("mlst_1")]), "Ref",
                                  sampleDF[labels, c("mlst_1")]))
   ggtree_plot %<+% d +
     layout_dendrogram() +
-    geom_tippoint(aes(fill = factor(mlst), x = x + .5), size = 6, shape = 21, color = 'black') +
-    geom_tiplab(aes(label = ref), size = 2.5, offset = -.4, color = 'black') +
-    geom_tiplab(aes(label = strip_repeat_suffix(label)), hjust = 1, offset = -1.5, show.legend = FALSE) +
+    geom_tippoint(aes(fill = factor(mlst), x = x + .5), size = 4, shape = 21, color = 'black') +
+    geom_tiplab(aes(label = ref), size = 1.7, offset = -.35, color = 'black') +
+    geom_tiplab(aes(label = strip_repeat_suffix(label)), size = 1.9, hjust = 1, offset = -1.3, show.legend = FALSE) +
     theme_dendrogram(plot.margin = margin(0, 0, 80, 0))
+}
+```
+
+```{r ref_diagnostics}
+if (exists("tree_missing_refs") && length(tree_missing_refs) > 0) {
+  cat("Reference IDs provided but not present in the tree:", paste(tree_missing_refs, collapse = " | "))
 }
 ```
 
@@ -400,7 +426,7 @@ Column {data-width=62}
 if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
   p2 <- ggtree(tree, branch.length = "none") + layout_dendrogram()
   d2 <- p2$data; bs2 <- d2[!d2$isTip,]; bs2$label <- as.numeric(bs2$label)
-  ggtree_plot2 <- p2 + geom_text(data = bs2, aes(label = label, vjust = 1.2), size = 2)
+  ggtree_plot2 <- p2 + geom_text(data = bs2, aes(label = label, vjust = 1.2), size = 1.6)
   rownames(sampleDF) <- sampleDF$specimen_id
   labels2 <- p2$data$label[p2$data$label %ni% bs2$label]
   month_val <- ifelse(
@@ -411,8 +437,8 @@ if (exists('treepath') & !is.null(ape::read.tree(treepath))) {
   d2 <- data.frame(label = labels2, month = month_val)
   ggtree_plot2 %<+% d2 +
     layout_dendrogram() +
-    geom_tippoint(aes(fill = factor(month), x = x + .5), size = 6, shape = 21, color = 'black') +
-    geom_tiplab(aes(label = strip_repeat_suffix(label)), hjust = 1, offset = -1.5, show.legend = FALSE) +
+    geom_tippoint(aes(fill = factor(month), x = x + .5), size = 4, shape = 21, color = 'black') +
+    geom_tiplab(aes(label = strip_repeat_suffix(label)), size = 1.9, hjust = 1, offset = -1.3, show.legend = FALSE) +
     theme_dendrogram(plot.margin = margin(0, 0, 80, 0)) +
     labs(fill = "Seq Month")
 }
