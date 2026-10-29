@@ -1,7 +1,7 @@
 process CFSAN {
   tag "CFSAN"
   label 'process_high'
-  container 'staphb/cfsan-snp-pipeline:2.2.1'
+  container 'staphb/cfsan-snp-pipeline@sha256:1a8d6097dc5872a1c28c1499be2a49ef41dec6b957bfc85c19ec1857ab0aeaed'
   
   input:
   path(gffs)

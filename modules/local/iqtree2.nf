@@ -1,7 +1,7 @@
 process IQTREE2 {
   tag "CORE TREE"
   label 'process_high'
-  container 'staphb/iqtree2:2.2.2.7'
+  container 'staphb/iqtree2@sha256:61c06874bbf40d91361f9b0deeb372cd8a32b38553f5b24e16a5a766220e968c'
   
   input:
   path(aln)

@@ -2,7 +2,7 @@ process REPORT_OUTBREAK {
   tag "REPORT_OUTBREAK"
   label 'process_high'
 
-    container 'ghcr.io/slsevilla/report:latest'
+    container 'ghcr.io/slsevilla/report@sha256:77594cf53cefd766ab4361df198520e562f869bdc0e1d7969132aeb96294bf9f'
 
   input:
     path(ch_config_arReport)

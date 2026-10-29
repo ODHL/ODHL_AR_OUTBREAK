@@ -2,7 +2,7 @@
 process ROARY {
     tag "ROARY"
     label 'process_high'
-    container 'staphb/roary:3.12.0'
+    container 'staphb/roary@sha256:4fb621c491ea5d0fd5193ea468353e7788c89709c6d9987412b62ec9faeee63b'
   
     input:
     path(gff)
