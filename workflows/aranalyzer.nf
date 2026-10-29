@@ -527,6 +527,7 @@ workflow arANALYZER {
         line_summary         = ch_line_summary
         pipeStats            = ch_pipeStats
         prokka_gff           = ch_prokkaGFF
+        bbmap_scaffolds      = ch_bbmapFiltScaffolds
         bbduk_reads          = ch_bbdukReads
         versions             = ch_versions
 }

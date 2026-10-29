@@ -148,10 +148,17 @@ workflow outbreakANALYZER {
                 collectedFiles.take(max_samples * 2)
             }
 
+        // Use the first available assembled scaffold as the SNP reference for CFSAN.
+        // This replaces the incorrect AR gene database reference input.
+        ch_cfsan_ref = arANALYZER.out.bbmap_scaffolds
+            .map { meta, fasta -> fasta }
+            .collect()
+            .map { collectedFastas -> collectedFastas[0] }
+
         // Run CFSAN SNP pipeline
         CFSAN(
             ch_all_fastqs,
-            ch_ardb,
+            ch_cfsan_ref,
             ch_snp_config
         )
 
