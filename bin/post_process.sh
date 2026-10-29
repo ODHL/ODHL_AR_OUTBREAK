@@ -47,10 +47,14 @@ for sample_id in "${sample_list[@]}"; do
 	num_of_fails=`cat $synopsis | grep -v "completed as FAILED" | grep -v "likely contaminated" | grep "FAILED" | wc -l`
 
 	# review lab results
-	labValue=`cat $lab_results | grep $sample_id | cut -f2 -d","`
+	if [[ "$lab_results" == "null" ]] || [[ ! -f "$lab_results" ]]; then
+		labValue=""
+	else
+		labValue=`cat $lab_results | grep $sample_id | cut -f2 -d","`
+	fi
 	pipelineValue=`cat $rawPipeline_results | grep $sample_id | awk -F"\t" '{print $9}' | awk -F" " '{print $1}'`
 	pipelineStatus=`cat $rawPipeline_results | grep $sample_id | awk -F"\t" '{print $2}'`
-		
+
 	# message if the lab didnt give results
 	if [[ $labValue == "" ]]; then echo "Missing lab value: $sample_id" >> $log_results; fi
 

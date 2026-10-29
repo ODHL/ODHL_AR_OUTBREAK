@@ -20,7 +20,6 @@ include { REPORT_OUTBREAK                   } from '../modules/local/report_outb
 ========================================================================================
 */
 include { arANALYZER                        } from './aranalyzer'
-include { CREATE_GFF_CHANNEL                } from '../subworkflows/local/create_gff_channel'
 
 /*
 ========================================================================================
@@ -31,14 +30,12 @@ workflow outbreakANALYZER {
     take:
         ch_reads
         ch_versions
-        samplesheet
 
     main:
         //////////////////////////////////////////////////////////////////
         // Params
         //////////////////////////////////////////////////////////////////
         projectID        = params.projectID
-        outbreak_species = params.outbreak_species
         max_samples      = params.max_samples
         percent_id       = params.percent_id
 
@@ -122,23 +119,9 @@ workflow outbreakANALYZER {
         //////////////////////////////////////////////////////////////////
         // STEP 7: OUTBREAK ANALYSIS - GFF / ROARY / IQTREE2
         //////////////////////////////////////////////////////////////////
-        // Get the filtered sample list from GFF samplesheet
-        CREATE_GFF_CHANNEL(samplesheet)
-        ch_sampleList = CREATE_GFF_CHANNEL.out.sampleList.map { it.id }
-
-        // Sample GFFs from arANALYZER prokka output, filtered to samplesheet
-        ch_sample_gffs = arANALYZER.out.prokka_gff
-            .map { meta, file -> [meta.id, file] }
-            .join(ch_sampleList)
-            .map { sample_id, file -> file }
-
-        // Reference GFFs from reference database
-        all_reference_gff = Channel
-            .fromPath("${params.reference_outdir}/${outbreak_species}/gff/*gff")
-            .map { file -> file }
-
-        // Combine sample + reference GFFs, capped at max_samples
-        ch_all_gffs = ch_sample_gffs.concat(all_reference_gff)
+        // Use all GFFs from arANALYZER (source + reference samples run live)
+        ch_all_gffs = arANALYZER.out.prokka_gff
+            .map { meta, file -> file }
             .collect().map { collectedFiles ->
                 collectedFiles.take(max_samples)
             }
@@ -157,20 +140,10 @@ workflow outbreakANALYZER {
         //////////////////////////////////////////////////////////////////
         // STEP 8: OUTBREAK ANALYSIS - FASTQ / CFSAN SNP
         //////////////////////////////////////////////////////////////////
-        // Sample trimmed FASTQs from arANALYZER bbduk output, filtered to samplesheet
-        ch_sample_fastqs = arANALYZER.out.bbduk_reads
-            .map { meta, files -> [meta.id, files] }
-            .join(ch_sampleList)
-            .map { sample_id, files -> files }
+        // Use all trimmed FASTQs from arANALYZER (source + reference samples run live)
+        ch_all_fastqs = arANALYZER.out.bbduk_reads
+            .map { meta, files -> files }
             .flatten()
-
-        // Reference FASTQs from reference database
-        all_reference_fastqs = Channel
-            .fromPath("${params.reference_outdir}/${outbreak_species}/bbduk/*fastq.gz")
-            .map { file -> file }
-
-        // Combine sample + reference FASTQs, capped at max_samples * 2 (R1+R2 per sample)
-        ch_all_fastqs = ch_sample_fastqs.concat(all_reference_fastqs)
             .collect().map { collectedFiles ->
                 collectedFiles.take(max_samples * 2)
             }

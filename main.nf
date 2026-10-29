@@ -17,6 +17,8 @@ include { CREATE_INPUT_CHANNEL      } from './subworkflows/local/create_input_ch
 include { PIPELINE_INITIALISATION   } from './subworkflows/local/utils_nfcore_odhlar_pipeline'
 include { PIPELINE_COMPLETION       } from './subworkflows/local/utils_nfcore_odhlar_pipeline'
 include { BASESPACE                 } from './modules/local/basespace'
+include { NCBI_DOWNLOAD             } from './modules/local/ncbi_download'
+include { GC_DOWNLOAD               } from './modules/local/gc_download'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -30,11 +32,12 @@ include { BASESPACE                 } from './modules/local/basespace'
 workflow OUTBREAK_ANALYZER {
 
     samplesheet  = file(params.input)
-    samplesheet_gff = file(params.input_gff)
     ch_versions  = Channel.empty()
 
     main:
         runBASESPACE = params.runBASESPACE.toBoolean()
+        runNCBI      = params.runNCBI.toBoolean()
+        runGC        = params.runGC.toBoolean()
 
         // Read and validate input samplesheet
         CREATE_INPUT_CHANNEL(
@@ -43,19 +46,26 @@ workflow OUTBREAK_ANALYZER {
         )
         ch_manifest = CREATE_INPUT_CHANNEL.out.reads
 
-        // Conditional BaseSpace download
-        if (runBASESPACE) {
-            BASESPACE(ch_manifest)
-            ch_reads = BASESPACE.out.reads
-        } else {
-            ch_reads = ch_manifest
-        }
+        ch_basespace = ch_manifest.filter { item -> item[0].download_mode == 'basespace' }
+        ch_ncbi      = ch_manifest.filter { item -> item[0].download_mode == 'ncbi' }
+        ch_gc        = ch_manifest.filter { item -> item[0].download_mode == 'gc' }
+        ch_local     = ch_manifest.filter { item -> item[0].download_mode == 'local' }
+
+        BASESPACE(ch_basespace)
+        NCBI_DOWNLOAD(ch_ncbi)
+        GC_DOWNLOAD(ch_gc)
+
+        // Strip download-only meta fields so downstream processes see only id
+        ch_reads = ch_local.mix(
+            BASESPACE.out.reads,
+            NCBI_DOWNLOAD.out.reads,
+            GC_DOWNLOAD.out.reads
+        ).map { item -> [[id: item[0].id], item[1]] }
 
         // Run the combined outbreak analysis workflow
         outbreakANALYZER(
             ch_reads,
-            ch_versions,
-            samplesheet_gff
+            ch_versions
         )
 }
 

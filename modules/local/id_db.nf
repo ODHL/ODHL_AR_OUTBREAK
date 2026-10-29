@@ -13,11 +13,9 @@ process ID_DB {
 
     script:
     """
-    cat $quality_results | awk '{print \$1}' > sample_list.csv
-
     core_ids.sh \
         $core_functions_script \
-        sample_list.csv \
+        $quality_results \
         $idDB_file \
         $projectID
         

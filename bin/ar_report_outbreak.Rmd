@@ -97,10 +97,13 @@ rootMethod <- config$root.method
 ```
 
 ```{r read, echo=FALSE}
-# Read in reference IDs
-reference_list <- read.csv(refpath, header = FALSE)
-ref_ids <- trimws(reference_list$V1)
-ref_ids <- ref_ids[!is.na(ref_ids) & ref_ids != "" & !grepl("^#", ref_ids)]
+# Read in reference IDs; handle empty file case
+ref_ids <- character(0)
+if (file.exists(refpath) && file.size(refpath) > 0) {
+  reference_list <- read.csv(refpath, header = FALSE)
+  ref_ids <- trimws(reference_list$V1)
+  ref_ids <- ref_ids[!is.na(ref_ids) & ref_ids != "" & !grepl("^#", ref_ids)]
+}
 ref_labels <- if (length(ref_ids) > 0) {
   setNames(paste0("ref", seq_along(ref_ids)), ref_ids)
 } else {

@@ -1,6 +1,7 @@
 #!/bin/bash
 # ODHL AR Outbreak Pipeline
 # Usage: bash run_workflow.sh -i OB26004 -s samplesheet.csv -g samplesheet_gff.csv -m metadata.csv -p Klebsiella_pneumoniae
+# For NCBI SRA download: samplesheet must have sample,srr_id columns; use -d ncbi
 
 #############################################################################################
 # Setup
@@ -23,13 +24,14 @@ helpFunction() {
    echo ""
    echo "Optional:"
    echo "  -n  nextflowParams     Additional Nextflow parameters (default: -profile docker,test --max_memory 7.GB --max_cpus 4)"
-   echo "  -r  resume             Resume previous run: Y or N (default: Y)"
+   echo "  -r  resume             Resume previous run: Y or N (default: N)"
    echo "  -l  labResults         Path to lab results CSV"
    echo "  -f  ref_samples        Path to reference samples CSV"
+   echo "  -d  download_mode      Download mode: ncbi | basespace | gc | mixed | local (default: local)"
    exit 1
 }
 
-while getopts "i:s:g:m:p:n:r:l:f:" opt; do
+while getopts "i:s:g:m:p:n:r:l:f:d:" opt; do
    case "$opt" in
       i ) project_id="$OPTARG" ;;
       s ) samplesheet="$OPTARG" ;;
@@ -40,6 +42,7 @@ while getopts "i:s:g:m:p:n:r:l:f:" opt; do
       r ) resume="$OPTARG" ;;
       l ) labResults="$OPTARG" ;;
       f ) ref_samples="$OPTARG" ;;
+      d ) download_mode="$OPTARG" ;;
       ? ) helpFunction ;;
    esac
 done
@@ -60,8 +63,9 @@ project_name=$(echo "$project_id" | cut -f1 -d "_" | cut -f1 -d " ")
 
 projDir="$HOME/output/$project_name"
 outDir="$projDir/results/outbreakANALYSIS"
-tmpDir="$projDir/tmp"
-if [[ ! -d $tmpDir ]]; then mkdir -p $tmpDir; fi
+storageRoot="${NXF_WORK_ROOT:-/mnt/storage1}"
+workDir="$storageRoot/$project_name/work"
+if [[ ! -d $workDir ]]; then mkdir -p $workDir; fi
 
 #############################################################################################
 # Optional defaults
@@ -70,12 +74,19 @@ if [ -z "$nextflowParams" ]; then
    nextflowParams="-profile docker,test --max_memory 7.GB --max_cpus 4"
 fi
 
-if [ -z "$resume" ] || [ "$resume" == "Y" ]; then
+if [ -z "$resume" ] || [ "$resume" != "N" ]; then
    nextflowParams="-resume $nextflowParams"
 fi
 
 if [ ! -z "$labResults" ];    then nextflowParams="$nextflowParams --labResults $labResults"; fi
 if [ ! -z "$ref_samples" ];   then nextflowParams="$nextflowParams --ref_samples $ref_samples"; fi
+
+# Download mode flags
+if   [ "$download_mode" == "ncbi" ];       then nextflowParams="$nextflowParams --runNCBI TRUE"
+elif [ "$download_mode" == "basespace" ];  then nextflowParams="$nextflowParams --runBASESPACE TRUE"
+elif [ "$download_mode" == "gc" ];        then nextflowParams="$nextflowParams --runGC TRUE"
+elif [ "$download_mode" == "mixed" ];     then nextflowParams="$nextflowParams --runBASESPACE TRUE --runGC TRUE"
+fi
 
 #############################################################################################
 # Run
@@ -90,7 +101,7 @@ cmd="nextflow run \
    --outbreak_species $outbreak_species \
    --outdir $outDir \
    --projectID $project_name \
-   -work-dir $tmpDir"
+   -work-dir $workDir"
 
 echo
 echo "Command Running:"
